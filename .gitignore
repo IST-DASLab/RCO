@@ -1,0 +1,15 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+.env
+.DS_Store
+
+# experiment artifacts
+results/
+*.pt
+*.pth
+*.npz
+*.log

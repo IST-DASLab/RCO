@@ -1,0 +1,30 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite the accompanying paper."
+title: "RCO: Riemannian Constrained Optimization for LLM Compression"
+abstract: >-
+  Reference implementation of the budget manifold and the RCO optimizer
+  (tangent projection, monotonic retraction, vector transport),
+  applied to mixed-precision quantization and MoE expert pruning of
+  large language models.
+authors:
+  - family-names: Helcig
+    given-names: Michael
+    affiliation: ETH Zurich
+  - family-names: Alistarh
+    given-names: Dan
+    affiliation: IST Austria
+version: "0.1.0"
+date-released: "2026-05-15"
+repository-code: "https://github.com/IST-DASLab/RCO"
+preferred-citation:
+  type: article
+  title: "Model Compression with Exact Budget Constraints via Riemannian Manifolds"
+  authors:
+    - family-names: Helcig
+      given-names: Michael
+      affiliation: ETH Zurich
+    - family-names: Alistarh
+      given-names: Dan
+      affiliation: IST Austria
+  year: 2026
+  url: "https://arxiv.org/abs/2605.00649"

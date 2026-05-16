@@ -1,0 +1,12 @@
+numpy>=1.24
+torch>=2.0
+transformers>=4.45
+accelerate>=0.30
+datasets>=2.16
+tqdm>=4.65
+# Needed by run_split_checkpoint.py (decompressing HF compressed-tensors checkpoints
+# into the per-layer database) and by run_build_checkpoint.py --format
+# compressed-tensors (packing the database back into a real compressed-tensors
+# checkpoint). >=0.15 ships replace_direct_state_dict and the BaseCompressor
+# classmethod interface this code depends on.
+compressed-tensors>=0.15
