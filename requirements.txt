@@ -1,12 +1,23 @@
-numpy>=1.24
-torch>=2.0
-transformers>=4.45
-accelerate>=0.30
-datasets>=2.16
-tqdm>=4.65
-# Needed by run_split_checkpoint.py (decompressing HF compressed-tensors checkpoints
-# into the per-layer database) and by run_build_checkpoint.py --format
-# compressed-tensors (packing the database back into a real compressed-tensors
-# checkpoint). >=0.15 ships replace_direct_state_dict and the BaseCompressor
+# Exact versions verified to work with the released RCO pipeline.
+#
+# Pinning matters: the mask-application hook in src/search/prune.py
+# (apply_hard_pruning_mask) detects the gate-return signature dynamically and
+# supports the Qwen3MoeTopKRouter triple introduced in transformers 5.x.
+# Older transformers (where Qwen3-MoE used a plain nn.Linear gate returning
+# raw logits) also work via a separate code path in the same hook.
+numpy==2.3.5
+torch==2.11.0+cu126
+transformers==5.7.0
+accelerate==1.13.0
+datasets==4.8.5
+tqdm==4.67.3
+
+# Only needed for run_split_checkpoint.py and run_build_checkpoint.py
+# --format compressed-tensors (database I/O against HF compressed-tensors
+# checkpoints). >=0.15 ships replace_direct_state_dict and the BaseCompressor
 # classmethod interface this code depends on.
-compressed-tensors>=0.15
+compressed-tensors==0.15.0.1
+
+# Only needed if running lm-eval-harness benchmarks on a pruned/quantized
+# checkpoint.
+lm_eval==0.4.11

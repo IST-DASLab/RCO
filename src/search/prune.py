@@ -329,17 +329,38 @@ def apply_hard_pruning_mask(model, prune_mask):
 
         def make_hook(mask, tk, norm_tk):
             def hook_fn(module, input, output):
-                # zero pruned experts in the gate output so topk cannot
-                # select them. The gate may return either the (full_softmax,
-                # topk_weights, topk_indices) triple or raw logits.
+                # The gate's return signature varies by model and transformers version:
+                #   (A) Plain raw logits tensor (older Qwen3-MoE, plain nn.Linear).
+                #   (B) (logits, topk_weights, topk_indices) triple (new Qwen3MoE's
+                #       Qwen3MoeTopKRouter in transformers >= 5.x).
+                #   (C) (full_softmax, topk_weights, topk_indices) triple
+                #       (OLMoE-style routers that pre-softmax).
+                # In (A) and (B) we mask raw logits with -inf so softmax sends
+                # pruned positions to exactly 0. In (C) we zero the softmax
+                # entries directly. We detect (B) vs (C) by checking whether
+                # output[0] looks like a probability distribution (rows sum to ~1).
                 if isinstance(output, (tuple, list)):
-                    full_softmax = output[0].clone()
-                    full_softmax[:, mask] = 0.0
-                    router_top_value, router_indices = full_softmax.topk(tk, dim=-1)
+                    first = output[0]
+                    row_sum = first.float().sum(dim=-1)
+                    is_softmax = bool(
+                        (row_sum.min() > 0.99) and (row_sum.max() < 1.01))
+                    if is_softmax:
+                        full = first.clone()
+                        full[:, mask] = 0.0
+                        top_v, top_i = full.topk(tk, dim=-1)
+                        if norm_tk:
+                            top_v = top_v / top_v.sum(dim=-1, keepdim=True).clamp(min=1e-9)
+                        top_v = top_v.to(full.dtype)
+                        return (full, top_v, top_i)
+                    # output[0] is raw logits (new Qwen3MoE)
+                    logits = first.clone()
+                    logits[:, mask] = float('-inf')
+                    probs = F.softmax(logits, dim=-1, dtype=torch.float)
+                    top_v, top_i = probs.topk(tk, dim=-1)
                     if norm_tk:
-                        router_top_value = router_top_value / router_top_value.sum(dim=-1, keepdim=True).clamp(min=1e-9)
-                    router_top_value = router_top_value.to(full_softmax.dtype)
-                    return (full_softmax, router_top_value, router_indices)
+                        top_v = top_v / top_v.sum(dim=-1, keepdim=True).clamp(min=1e-9)
+                    top_v = top_v.to(first.dtype)
+                    return (logits, top_v, top_i)
                 else:
                     out = output.clone()
                     out[:, mask] = float('-inf')
@@ -360,36 +381,39 @@ def remove_hooks(hooks):
 @torch.no_grad()
 def evaluate_with_mask(model, prune_mask, cal_data, ref_log_probs, ref_masks,
                        batch_size=4):
-    """Evaluate KL and ESAP with proper hard pruning (answer tokens only)."""
+    """Evaluate calibration KL of the discrete mask under the deployed routing.
+
+    Installs apply_hard_pruning_mask: a gate-output hook that sets pruned-expert
+    logits to -inf so topk picks from kept-only. This matches the actual
+    deployment behavior produced by run_build_checkpoint.py prune --prune-mode
+    remove + vllm_pruned_patch (pruned experts physically absent; gate's natural
+    output dimension is the kept count, top-k is unambiguously from kept).
+    """
     hooks = apply_hard_pruning_mask(model, prune_mask)
     device = get_input_device(model)
 
     total_kl = 0.0
-    total_esap = 0.0
     n_answer_tok = 0
 
-    for i in range(0, cal_data.size(0), batch_size):
-        batch = cal_data[i:i + batch_size].to(device)
-        bi = i // batch_size
-        bi = min(bi, len(ref_log_probs) - 1)
-        ref_lp = ref_log_probs[bi].to(device)
-        # ref_masks is (B, T) unshifted; align with logits[:, :-1, :].
-        m = ref_masks[bi][:, 1:].to(device)
+    try:
+        for i in range(0, cal_data.size(0), batch_size):
+            batch = cal_data[i:i + batch_size].to(device)
+            bi = i // batch_size
+            bi = min(bi, len(ref_log_probs) - 1)
+            ref_lp = ref_log_probs[bi].to(device)
+            m = ref_masks[bi][:, 1:].to(device)
 
-        logits = model(input_ids=batch).logits[:, :-1, :].contiguous().float()
-        q_lp = F.log_softmax(logits, dim=-1)
-        p = ref_lp.float().exp()
+            logits = model(input_ids=batch).logits[:, :-1, :].contiguous().float()
+            q_lp = F.log_softmax(logits, dim=-1)
+            p = ref_lp.float().exp()
 
-        kl = (p * (ref_lp.float() - q_lp)).sum(dim=-1)  # (B, T-1)
-        total_kl += (kl * m).sum().item()
+            kl = (p * (ref_lp.float() - q_lp)).sum(dim=-1)
+            total_kl += (kl * m).sum().item()
+            n_answer_tok += m.sum().item()
+    finally:
+        remove_hooks(hooks)
 
-        esap = torch.min(p, q_lp.exp()).sum(dim=-1)  # (B, T-1)
-        total_esap += (esap * m).sum().item()
-
-        n_answer_tok += m.sum().item()
-
-    remove_hooks(hooks)
-    return total_kl / max(n_answer_tok, 1), total_esap / max(n_answer_tok, 1)
+    return total_kl / max(n_answer_tok, 1)
 
 
 # ----------------------------------------------------------------------------

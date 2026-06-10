@@ -112,10 +112,10 @@ def main(argv=None) -> int:
             args.calibration_seq_length, tokenizer, args.seed)
         ref_log_probs, ref_masks = build_ref_cache(
             model, cal_data, cal_masks, args.batch_size)
-        kl, esap = evaluate_with_mask(
+        kl = evaluate_with_mask(
             model, prune_mask, cal_data, ref_log_probs, ref_masks,
             args.batch_size)
-        logger.info(f"KL={kl:.6f}  ESAP={esap:.4f}")
+        logger.info(f"KL={kl:.6f}")
         return 0
 
     cal_data, cal_masks = load_calibration_data(
@@ -124,16 +124,16 @@ def main(argv=None) -> int:
     ref_log_probs, ref_masks = build_ref_cache(
         model, cal_data, cal_masks, args.batch_size)
 
-    freq_kl, freq_esap = None, None
+    freq_kl = None
     if not args.skip_freq_baseline:
         freq = compute_frequency(
             model, cal_data, n_layers, n_experts, top_k, args.batch_size)
         freq_mask = frequency_uniform_mask(
             freq, n_layers, n_experts, target_budget)
-        freq_kl, freq_esap = evaluate_with_mask(
+        freq_kl = evaluate_with_mask(
             model, freq_mask, cal_data, ref_log_probs, ref_masks,
             args.batch_size)
-        logger.info(f"Freq uniform: KL={freq_kl:.6f}  ESAP={freq_esap:.4f}")
+        logger.info(f"Freq uniform: KL={freq_kl:.6f}")
 
     router_scores = None
     if args.router_init:
@@ -171,7 +171,7 @@ def main(argv=None) -> int:
 
     n_pruned = search_mask.sum().item()
     per_layer = search_mask.sum(dim=1).tolist()
-    search_kl, search_esap = evaluate_with_mask(
+    search_kl = evaluate_with_mask(
         model, search_mask, cal_data, ref_log_probs, ref_masks, args.batch_size)
 
     logger.info("=" * 60)
@@ -181,8 +181,8 @@ def main(argv=None) -> int:
     logger.info(f"Sparsity: {args.sparsity} ({target_budget} experts)")
     logger.info(f"Time:     {elapsed:.1f}s")
     if freq_kl is not None:
-        logger.info(f"Freq uniform:  KL={freq_kl:.6f}  ESAP={freq_esap:.4f}")
-    logger.info(f"STE search:    KL={search_kl:.6f}  ESAP={search_esap:.4f}")
+        logger.info(f"Freq uniform:  KL={freq_kl:.6f}")
+    logger.info(f"STE search:    KL={search_kl:.6f}")
     for l in range(n_layers):
         r = per_layer[l]
         logger.info(f"  Layer {l:2d}: prune {r:2d}/{n_experts} "
@@ -197,10 +197,10 @@ def main(argv=None) -> int:
             'sparsity': args.sparsity,
             'target_budget': target_budget,
             'calibration_data': args.calibration_data,
-            'freq_baseline': {'kl': freq_kl, 'esap': freq_esap}
+            'freq_baseline': {'kl': freq_kl}
                 if freq_kl is not None else None,
             'search': {
-                'kl': search_kl, 'esap': search_esap,
+                'kl': search_kl,
                 'per_layer': per_layer,
                 'n_pruned': int(n_pruned),
             },
