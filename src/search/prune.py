@@ -188,15 +188,14 @@ class MoEPruneWrapper:
             if norm_topk_prob:
                 routing_weights /= routing_weights.sum(dim=-1, keepdim=True)
 
-        # scale each selected expert's routing weight by its survival prob
-        # (1.0 keep, 0.0 prune), then renormalize so the row still sums to 1.
+        # Scale selected experts' weights by their survival value. Do NOT
+        # renormalize: it breaks the STE gradient and stalls the search.
         lm = layer_mask
         if lm.device != h.device:
             lm = lm.to(h.device)
 
         expert_survival = lm[selected]
         ste_weights = routing_weights.float() * expert_survival.float()
-        ste_weights = ste_weights / ste_weights.sum(dim=-1, keepdim=True).clamp(min=1e-9)
         ste_weights = ste_weights.to(h.dtype)
 
         # stash raw gate logits for the OLMoE-style return signature.
